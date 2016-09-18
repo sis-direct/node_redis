@@ -1,23 +1,29 @@
 'use strict';
 
-var assert = require("assert");
-var config = require("./lib/config");
+var assert = require('assert');
+var config = require('./lib/config');
 var helper = require('./helper');
 var redis = config.redis;
 
-describe("rename commands", function () {
+if (process.platform === 'win32') {
+    // TODO: Fix redis process spawn on windows
+    return;
+}
+
+describe('rename commands', function () {
     before(function (done) {
         helper.stopRedis(function () {
             helper.startRedis('./conf/rename.conf', done);
         });
     });
 
-    helper.allTests(function(parser, ip, args) {
+    helper.allTests(function (parser, ip, args) {
 
-        describe("using " + parser + " and " + ip, function () {
+        describe('using ' + parser + ' and ' + ip, function () {
             var client = null;
 
-            beforeEach(function(done)  {
+            beforeEach(function (done) {
+                if (helper.redisProcess().spawnFailed()) return done();
                 client = redis.createClient({
                     rename_commands: {
                         set: '807081f5afa96845a02816a28b7258c3',
@@ -27,35 +33,36 @@ describe("rename commands", function () {
                 });
 
                 client.on('ready', function () {
-                    done();
+                    client.flushdb(done);
                 });
             });
 
             afterEach(function () {
+                if (helper.redisProcess().spawnFailed()) return;
                 client.end(true);
             });
 
-            it("allows to use renamed functions", function (done) {
+            it('allows to use renamed functions', function (done) {
                 if (helper.redisProcess().spawnFailed()) this.skip();
 
-                client.set('key', 'value', function(err, reply) {
+                client.set('key', 'value', function (err, reply) {
                     assert.strictEqual(reply, 'OK');
                 });
 
-                client.get('key', function(err, reply) {
+                client.get('key', function (err, reply) {
                     assert.strictEqual(err.message, "ERR unknown command 'get'");
                     assert.strictEqual(err.command, 'GET');
                     assert.strictEqual(reply, undefined);
                 });
 
-                client.getrange('key', 1, -1, function(err, reply) {
+                client.getrange('key', 1, -1, function (err, reply) {
                     assert.strictEqual(reply, 'alue');
                     assert.strictEqual(err, null);
                     done();
                 });
             });
 
-            it("should also work with batch", function (done) {
+            it('should also work with batch', function (done) {
                 if (helper.redisProcess().spawnFailed()) this.skip();
 
                 client.batch([['set', 'key', 'value']]).exec(function (err, res) {
@@ -72,7 +79,7 @@ describe("rename commands", function () {
                 });
             });
 
-            it("should also work with multi", function (done) {
+            it('should also work with multi', function (done) {
                 if (helper.redisProcess().spawnFailed()) this.skip();
 
                 client.multi([['set', 'key', 'value']]).exec(function (err, res) {
@@ -89,12 +96,12 @@ describe("rename commands", function () {
                 });
             });
 
-            it("should also work with multi and abort transaction", function (done) {
+            it('should also work with multi and abort transaction', function (done) {
                 if (helper.redisProcess().spawnFailed()) this.skip();
 
                 var multi = client.multi();
                 multi.get('key');
-                multi.getrange('key', 1, -1, function(err, reply) {
+                multi.getrange('key', 1, -1, function (err, reply) {
                     assert.strictEqual(reply, 'alue');
                     assert.strictEqual(err, null);
                 });
@@ -109,10 +116,30 @@ describe("rename commands", function () {
                 });
             });
 
+            it('should also work prefixed commands', function (done) {
+                if (helper.redisProcess().spawnFailed()) this.skip();
+
+                client.end(true);
+                client = redis.createClient({
+                    rename_commands: {
+                        set: '807081f5afa96845a02816a28b7258c3'
+                    },
+                    parser: parser,
+                    prefix: 'baz'
+                });
+                client.set('foo', 'bar');
+                client.keys('*', function (err, reply) {
+                    assert.strictEqual(reply[0], 'bazfoo');
+                    assert.strictEqual(err, null);
+                    done();
+                });
+            });
+
         });
     });
 
     after(function (done) {
+        if (helper.redisProcess().spawnFailed()) return done();
         helper.stopRedis(function () {
             helper.startRedis('./conf/redis.conf', done);
         });
